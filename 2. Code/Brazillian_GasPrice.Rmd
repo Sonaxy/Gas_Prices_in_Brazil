@@ -1,0 +1,747 @@
+---
+title:    "Forecasting & Analytics: Gas Prices in Brazil"
+subtitle: |
+  |
+  | Data Science & Analytics, University of Oklahoma
+  | ISE/DSA 5133: Energy Analytics
+  | Dr. Talayeh Razzaghi
+author:   "Anna Christensen & Sonaxy Mohanty"
+date:     "December 13th, 2022"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: true
+    toc_depth: 4
+    highlight: arrow
+    latex_engine: xelatex
+  # github_document:
+  #   toc: yes
+  #   toc_depth: 2
+urlcolor: blue
+cache: true
+fig.width: 7
+fig.height: 5
+---
+
+```{r setup, include=FALSE}            
+                                       # By default...
+knitr::opts_chunk$set(echo    = FALSE, # show code
+                      message = FALSE, # Do not show messages
+                      warning = FALSE # Do not show warning messages
+
+                      )
+```
+
+```{r error=FALSE}
+# Packages --------
+
+## Time Series Objects
+library(fpp3)
+
+## Reader file
+library(readr)
+
+## Normalize
+library(caret) 
+
+## Aesthetics
+library(ggplot2)
+library(ggpubr)
+library(knitr)
+library(glue)
+
+```  
+
+\newpage  
+# Introduction  
+As large-scale collections of energy data are made available to the public, forecasting this data becomes a new challenge and concern for companies and entities that are affected by the uncertain nature of this data. This data can be particularly difficult to forecast given its complexity due to the numerous independent and confounding factors that affect the response values. This project focuses on energy price data obtained from the National Agency of Petroleum, Natural Gas, and Biofuels in Brazil to develop improved forecasting models that can predict price data in the future.  
+
+We hypothesize that an ARIMA or ETS model will provide an improvement in forecasting the data when compared to simple benchmark methods. We hope that developing these models would allow for price data to be predicted with more accuracy, which would allow entities in the energy industry to better plan for future price and distribution strategies.  
+
+Brazil is a unique country in its approach to satisfying the demand for vehicle fuels.
+In response to uncertainty and embargoes dictated by the Organization of the Petroleum Exporting Countries (OPEC), Brazil has been pushing for an innovative biofuels program since the 1970s (Stecker, 2013). As a result of their investments and the introduction of Flex Fuel vehicles, Brazil has a booming production of sugarcane ethanol, and about 95 percent of cars in Brazil are flex-fuel vehicles. Brazil has also been experiencing a crude oil boom for the last decade, with discovery and production occurring rapidly. As a result, Brazil has an energy mix that includes cheap and abundant ethanol and gasoline.  
+
+One significant event in energy markets that occurred during the period contained in the dataset is the global oil price drop of 2014. From June to December 2014, oil prices dropped about 40% for the Brent benchmark, which is an international index of crude oil prices (Samuelson, 2014). The main cause of this steep price decrease was simple supply and demand: the world was producing a large supply of oil for too little demand. Since consumers’ needs for petroleum products are rigid in the short term, a surplus (or shortage) of oil can cause significant and sudden price swings. In this particular instance, the price drop lasted until about 2016, when the global supply and demand balance shifted again. It is expected that these major changes in oil prices will affect the gasoline price data that we are considering. The price of oil is one of the major factors in the prices of petroleum-derived products like gasoline and diesel, so these prices should also decrease significantly during this time.  
+
+ARIMA models and their derivations have become very common as a simple yet effective way to forecast energy demand and price data. Research by Zhang and Zhao (2022) proposed an application of this method to forecasting gasoline data by performing decomposition on the dataset and fitting a relatively simple model to each component. When aggregated, these simple models produce powerful and accurate forecasting results. For the application discussed in the paper, X11 decomposition was performed, and a linear regression model was used for the trend component since this component is relatively stable with little fluctuation. A SARIMA model was fitted to the seasonal component of the data and can also be fitted to a periodic component. The authors suggest using a neural network model for the uncertainty component if needed since it is generally more complex to forecast. This method is relatively easy to understand and apply, but the results from the application in the paper are impressive, as the MAPE for all models was less than 1%.  
+
+For more extensive studies, machine learning models have been found to produce extremely accurate models for gasoline time series data, which is generally uncertain and unstable. One paper that attempted to create new methods of forecasting gasoline consumption found that a random forest machine learning algorithm, used for both classification and regression, produced a stable and robust model that could most accurately forecast gasoline consumption (Ceylan et al., 2022). The random forest method generates large numbers of decision trees from random subsets of the training set of data. This model had a MAPE value of 11.529%, which is a very good fit for this type of data. Machine learning models such as the random forest model could be considered in the future analysis of this data to produce more advanced and accurate models.  
+  
+# Project Description  
+## Approach  
+  
+To build the model, several tasks are undertaken, which are summarized in the four-phase process displayed in Figure 1.
+  
+```{r, fig.align='center'}
+knitr::include_graphics("Fig1.png")
+```
+  
+    
+## Dataset  
+The dataset contains metrics from weekly reports of gasoline, diesel, and other fuels used in transportation. This data focuses on the pricing of fuels in Brazil and is obtained from a Brazilian government agency, The National Agency of Petroleum, Natural Gas, and Biofuels (ANP in Portuguese). The observations in the dataset range from 2004 to May 2021. The data set includes 120,823 observations. The variables contained in the data are the mean resale price (price per liter, or per 13 kilograms, or per cubic meter), the minimum resale price (price per liter, or per 13 kilograms, or per cubic meter), the number of gas stations analyzed, and the standard deviation. The data points are grouped by product, region, and state. The link to the dataset can be found below:  
+https://www.kaggle.com/matheusfreitag/gas-prices-in-brazil  
+  
+# Project Tasks  
+  
+## Data Pre-Processing  
+
+Since the .tsv data file is in Portuguese, we have to change the column names to English for ease of understanding each attribute. The numeric attributes related to the gas price have many different units, which needed to be normalized. Then a tsibble object is created with month as the index and region as the key, since we focused mainly on analyzing and forecasting the gas price of a region in Brazil. There are some gaps in the time series data, as seen in the below plot, that were taken care of.  
+  
+```{r}
+data.base <- readr::read_tsv("2004-2021.tsv")
+#data.base <- read.csv("Gas_Prices_in_Brazil.csv")
+#view(data.base)
+
+# renaming column names
+colnames(data.base) <- c('start_date','end_date','region', 'state', 'product', 
+                         'n_gas_stations', 'unit', 'avg_resale_price', 'sd_resale_price', 'min_resale_price',
+                         'max_resale_price', 'avg_resale_margin', 'coef_resale_price', 'avg_distr_price', 'sd_distr_price',
+                         'min_distr_price', 'max_distr_price', 'coef_distr_price')
+
+#str(data.base)
+
+### Ensure numeric variables are numeric
+    data.base <- data.base %>% 
+      mutate_at(vars(
+      n_gas_stations,
+      avg_resale_price,
+      sd_resale_price,
+      min_resale_price,
+      max_resale_price,
+      avg_resale_margin,
+      coef_resale_price,
+      avg_distr_price,
+      sd_distr_price,
+      min_distr_price,
+      max_distr_price,
+      coef_distr_price
+      ), as.numeric) %>%
+    
+    ### Make sure dates are dates
+    mutate_at(vars(start_date,
+                   end_date), as.Date, format = "%Y-%m-%d") %>%
+  
+    ### Ensure factor are factors
+    mutate_at(vars(
+      region,
+      state,
+      product,
+      unit
+    ), as.factor)
+    
+#str(data.base)
+    
+    
+### Normalize data
+preproc1 <- preProcess(data.base, method=c("center", "scale"))
+ 
+norm1 <- predict(preproc1, data.base)
+
+#summary(norm1)
+
+
+### Create a tsibble object
+
+df <- norm1 %>%
+  mutate(Month = yearmonth(start_date)) %>%
+  group_by(Month, region) %>%
+  select(c(Month, region, avg_resale_price)) %>%
+  summarize(.groups = 'keep',across(avg_resale_price,
+                   list(mu = ~ mean(.)))) %>%
+  # {table(.$Month, .$region)}
+  # select(-start_date) %>%
+  as_tsibble(index = Month, key = region) %>%   #, regular = FALSE)
+  ungroup() 
+
+
+gaps <- df %>% 
+  count_gaps(.full = TRUE)
+
+
+ggplot(gaps, aes(x = region, colour = region)) +
+  geom_linerange(aes(ymin = .from, ymax = .to)) +
+  geom_point(aes(y = .from)) +
+  geom_point(aes(y = .to)) +
+  coord_flip() +
+  labs(title = "Gaps in Time Series Data")+
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "bottom")
+
+### To fill in key and index in the existing time series
+df <- df %>% 
+  fill_gaps(avg_resale_price_mu = 0L, .full = TRUE)
+
+### To impute missing values for the filled in key and index values
+df <- df %>% 
+  group_by_key() %>% 
+  fill_gaps(avg_resale_price_mu = mean(avg_resale_price_mu), .full = TRUE)
+
+
+colnames(df) <- c('Month','Region','Avg.Price')
+```  
+  
+## Hold-out Validation  
+The collected data were divided into a training dataset (2004 May to 2018 Dec) and a testing dataset (2019).
+  
+```{r}
+train <- df %>% filter_index('2004 May' ~   '2018 Dec')  
+test <- df %>% filter_index('2019 Jan' ~ '2019 Dec')  
+```
+    
+## Brazillian Gas Prices Trend and Seasonality   
+  
+The gas price has an upward trend. It also appears that there may be monthly seasonality present in the data, but more detail is needed to see this. No cyclical pattern is present. For all regions, the period from about 2013–2015 is an outlier. There was a sharp decline in the data around 2014, but the data has since risen steeply back to the historical trend around 2016.  
+
+```{r, results='hide',fig.keep='all'}
+### autoplot()
+train %>%
+  autoplot(Avg.Price, size=1) +
+  labs(y='Gas Average Resale Price',
+     title='Time Series Plot: Gas Avgerage Resale Price for Brazil') +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+```  
+&nbsp;  
+
+The seasonal plot shows the subtle yearly seasonality in the data. There is an increase in the data each year beginning around August. Each year follows a similar pattern and the upward trend causes increases in the data each year.  
+
+```{r, fig.width=7.5, fig.height=6}
+### gg_season()
+train %>%
+  gg_season(Avg.Price, labels='both') +
+  labs(y='Gas Average Resale Price',
+       title='Seasonal Plot: Gas Avgerage Resale Price for Brazil') +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+```  
+&nbsp;  
+  
+We can see the seasonal pattern with the increase at the end of the year and the upward trend in the subseries plot.  
+  
+```{r, fig.height=5.5}
+### gg_subseries()
+train %>%
+  gg_subseries(Avg.Price) +
+  labs(y='Gas Average Resale Price',
+     title='Seasonal Subseries Plot: Gas Avgerage Resale Price for Brazil') +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+
+```  
+&nbsp;  
+  
+The ACF plot shows that significant autocorrelation is present in the data, so the time series does not resemble white noise. Strong positive autocorrelation is present in the first three years, and the ACF value decreases with each lag. Interestingly, there is significant negative autocorrelation with data further back as well, with the peak around a lag of 11-12 years back.  
+
+```{r, fig.height=5.5}
+### ACF()
+train %>%
+  ACF(Avg.Price, lag_max = 200) %>%
+  autoplot() +
+  labs( y='Autocorrelation Coefficients',
+        title='Autocorrelation Plot: Gas Avgerage Resale Price for Brazil') +
+  theme(axis.title=element_text(size=10),
+        axis.text.y=element_text(size=8),
+        axis.text.x=element_text(size=5),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+
+```  
+ 
+
+## Decompose Time Series  
+  
+STL decomposition is performed because STL is versatile and robust for decomposing time series as compared to SEATS and X11 cannot. The decomposition breaks the data down into several components by region. The data show an upward trend with a change in trend around 2014-2016. The monthly seasonality component is shown in more detail for each region. The scale shows that, while it has a smaller effect, there is a monthly seasonal pattern present. Several outliers are also present in the data. Some regions have a smaller error component with fewer outliers than others. For example, the series for the Norte region shows a far lower smooth error component than the others, suggesting a high level of unexplained uncertainty and variability. In contrast, the Nordeste, Sudeste, and Sul regions have a smoother error component with less unexplained variability. One outlier that is present in every region is the extremely low value around 2014, when there is a steep drop in the whole data series.  
+
+```{r, fig.height=6.5, fig.width=8}
+
+### STL decomposition because the response variable is non-negative
+### Plots for various regions
+
+stl_dcmp <- train %>% 
+   model(
+    STL(Avg.Price ~ trend(window = 7) +
+                   season(window = "periodic"),
+    robust = TRUE)) %>%
+  components()
+
+
+a <- stl_dcmp %>%
+  filter(Region == 'CENTRO OESTE') %>%
+  autoplot() +
+  labs(title='Centro Oeste') +
+   theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=6),
+        strip.text = element_text(size=6))
+
+
+b <- stl_dcmp %>% 
+  filter(Region == 'NORDESTE') %>%
+  autoplot() +
+  labs(title='Nordeste') +
+   theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=6),
+        strip.text = element_text(size=6))
+
+c <- stl_dcmp %>% 
+  filter(Region == 'NORTE') %>%
+  autoplot() +
+  labs(title='Norte') +
+   theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=6),
+        strip.text = element_text(size=6))
+
+
+d <- stl_dcmp %>% 
+  filter(Region == 'SUDESTE') %>%
+  autoplot() +
+  labs(title='Sudeste') +
+   theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=6),
+        strip.text = element_text(size=6))
+
+e <- stl_dcmp %>% 
+  filter(Region == 'SUL') %>%
+  autoplot() +
+  labs(title='Sul') +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=6),
+        strip.text = element_text(size=6))
+
+plot <- ggarrange(a, b, c, d, e, ncol=2, nrow=3)
+annotate_figure(plot, top = text_grob("Decomposition of Monthly Average Resale Price using STL for Various Brazillian Regions",
+color = "black", face = "bold", size = 12))
+```  
+&nbsp;  
+
+This plot shows the identified trend and seasonal component plotted over the actual data. We see that the trend explains most of the values seen in the actual data.  
+
+## Transformation  
+```{r, fig.width=7.5}
+
+lambda <- train %>%
+  filter(Region == 'CENTRO OESTE') %>%
+  features(Avg.Price, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+x <- train %>%
+  filter(Region == 'CENTRO OESTE') %>%
+    autoplot(Avg.Price)
+
+y <- train %>%
+  filter(Region == 'CENTRO OESTE') %>%
+    autoplot(box_cox(Avg.Price, lambda)) +
+  labs(y = "",
+       title = latex2exp::TeX(paste0(
+         "$\\lambda$ = ",
+         round(lambda,2))))
+
+
+plot3 <- ggarrange(x, y, ncol=2, nrow=1)
+annotate_figure(plot3, top = text_grob("Non-transormed vs Transformed Average Gas Price",
+color = "black", face = "bold", size = 12))
+```
+A box-cox transformation is applied to the data to see if it improves the data variability. When comparing the transformed data with the actual data, we see that the transformation has very little effect on the shape of the data. A log transformation yielded similarly insignificant results. Therefore, we have concluded that a transformation is not necessary. 
+    
+## Fitting Models 
+
+### Benchmark & Exponential Smoothing Models
+```{r}
+bmodels.fit <- train %>% 
+  model(
+    Mean = MEAN(Avg.Price),
+    Naive = NAIVE(Avg.Price),
+    SNaive = SNAIVE(Avg.Price),
+    Drift = RW(Avg.Price ~ drift()),
+    ETS = ETS(Avg.Price)
+    )
+```
+Several benchmark methods have been fitted to the training set - Mean, Naive, Seasonal Naive, Drift, alongwith Exponential Smoothing (ETS) model. 
+  
+### ARIMA Model  
+
+Due to the limitations of the ARIMA model, we are choosing one region, *Centro Oeste*, to focus on fitting the model to. We will select optimal parameters for this region, fit the ARIMA model, and compare it to the benchmark models that were previously fitted.
+  
+#### Checking Seasonal & Order Differences  
+Since the time series data for gas prices is not stationary, differencing needs to be performed to stabilize its mean.  
+
+```{r}
+train %>% features(Avg.Price, unitroot_nsdiffs) %>%
+  knitr::kable(caption = 'Seasonal Differences for Different Regions')
+
+train %>% features(Avg.Price, unitroot_ndiffs) %>%
+  knitr::kable(caption = 'Order Differences for Different Regions')
+```  
+When using the KPSS test to conduct the Unit Root test on the time series data, we have obtained results for the number of differences and seasonal differences needed to obtain stationary data. The test results show that we don't need any seasonal differences, since the seasonal component is not strong enough to have a significant effect. The results also show that for the Centro Oeste, Nordeste, and Norte regions, 2 differences are needed, and for the Sudeste and Sul regions, only 1 difference is needed.  
+  
+
+#### Differenced Data Plots
+Next, we will plot the differenced data by region to ensure that the results are stationary.
+```{r, fig.height=6.5, fig.width=8, fig.align='left'}
+
+f <- train %>% filter(Region == 'CENTRO OESTE') %>%
+autoplot(Avg.Price %>%
+difference(1) %>%
+difference(1)) +
+  labs(title = 'Centro Oeste',
+       y='')+
+  theme_minimal() +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=4),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+
+g <- train %>% filter(Region == 'NORDESTE') %>%
+autoplot(Avg.Price %>%
+difference(1) %>%
+difference(1)) +
+  labs(title = 'Nordeste',
+       y='')+
+  theme_minimal() +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=4),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+
+h <- train %>% filter(Region == 'NORTE') %>%
+autoplot(Avg.Price %>%
+difference(1) %>%
+difference(1)) +
+  labs(title = 'Norte',
+       y='')+
+  theme_minimal() +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=4),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+
+i <- train %>% filter(Region == 'SUDESTE') %>%
+autoplot(Avg.Price %>%
+difference(1)) +
+  labs(title = 'Sudeste',
+       y='')+
+  theme_minimal() +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=4),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+
+j <- train %>% filter(Region == 'SUL') %>%
+autoplot(Avg.Price %>%
+difference(1)) +
+  labs(title = 'Sul',
+       y='')+
+  theme_minimal() +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=4),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+
+
+
+plot1 <- ggarrange(f, g, h, i, j, ncol=2, nrow=3)
+annotate_figure(plot1, top = text_grob("Differencing of Monthly Average Resale Price for Various Brazillian Regions",
+color = "black", face = "bold", size = 12))
+
+```
+The differenced data sets now show a stationary series for each region.  
+  
+#### PACF & ACF plots for Centro Oeste  
+
+```{r, fig.width=8, fig.align='left'}
+train %>% filter (Region == 'CENTRO OESTE') %>%  
+  gg_tsdisplay(Avg.Price %>% difference(1) %>% difference(1), 
+                      plot_type = 'partial', lag = 36) +
+  labs(title = "Second Order Differenced",
+       y="")
+```
+The results of the ACF plot shows a significant autocorrelation at lag 1. The PACF plot shows a significant autocorrelation at lag 1 that exponentially decays for the next 4 periods. We will use these results to inform the ARIMA model that we will test. 
+
+  
+```{r}
+ar.fit <- train %>% filter (Region == 'CENTRO OESTE') %>% 
+  model(
+    Arima321 = ARIMA(Avg.Price ~ pdq(3,2,1)),
+    Arima221 = ARIMA(Avg.Price ~ pdq(2,2,1)),
+    Arima421 = ARIMA(Avg.Price ~ pdq(4,2,1)),
+    Arima = ARIMA(Avg.Price, stepwise = FALSE, approx = FALSE)
+  )
+
+glance(ar.fit) %>% arrange(AICc) %>% select(.model:BIC) %>%
+  knitr::kable(caption = 'Different ARIMA Models Tested')
+
+#ar.fit %>% select(Arima) %>% report()
+
+```  
+The auto-selected $ARIMA(0,2,1)$ model performs better than the ARIMA models with parameters that we selected to test, according to the three measures that we have chosen to evaluate the models: AIC, AICc, and BIC. The next best model that we created was a 3, 2, 1 ARIMA model. We will move forward with the auto ARIMA model and compare this model to the benchmarks we have fitted.  
+  
+#### Notations  
+  
+Second-order differencing `without backshift operation` for $ARIMA(0,2,1) model$:  
+$y_t' = \theta_1\epsilon_{t-1} + \epsilon_t$  where $y_t'$ is second-order differenced series  
+  
+  
+Second-order differencing `with backshift operation` for $ARIMA(0,2,1) model$:    
+$(1 - B)^2y_t = (1 + \theta_1B)\epsilon_t$  
+  
+  
+## Evaluating Models
+
+### Forecast Plot  
+From the plot, the Naive and Seasonal Naive appear to be the methods that perform the best.  
+
+```{r}
+t <- test %>% filter(Region == 'CENTRO OESTE') 
+
+bmodels.fc <- bmodels.fit %>% forecast(t)
+ar.fc <- ar.fit %>% select(Region,Arima) %>% forecast(t)
+
+fc <- bind_rows(bmodels.fc, ar.fc)
+
+
+# Plotting forecast values against the actual values
+#for CENTRO OESTE Region
+
+fc %>%
+autoplot(train, level=NULL) +
+autolayer(t, Avg.Price, color = 'black') +
+labs(y = 'Gas Avgerage Resale Price',
+title = 'Forecasts for Centro Oeste Average Gas Price') +
+  guides(color=guide_legend(title='Forecast')) +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+### Accuracy Measures  
+The accuracy measures confirm that the Naive and then Sesonal Naive methods did perform the best. The ETS model is also more accurate than the ARIMA model, though neither is the most accurate.  
+&nbsp;  
+
+```{r}
+fc %>%
+  accuracy(df %>% filter (Region == 'CENTRO OESTE')) %>% 
+select(!c(.type, ME, MPE, RMSSE, ACF1, Region)) %>%
+  arrange(RMSE, MAPE, MASE, MAE) %>%
+  knitr::kable(caption = 'Accuracy Measures of Models ')
+
+
+```  
+
+### Residual Diagnostics from the best method  
+```{r}
+bmodels.aug <- bmodels.fit %>%
+select(Naive) %>%
+augment()
+```  
+  
+#### Histograms 
+```{r, fig.width=8, fig.align='left'}
+bmodels.aug %>%
+ggplot(aes(x = .innov)) +
+geom_histogram(aes(fill=Region, color=Region)) +
+facet_wrap(Region ~.) +
+labs(x = 'Innovation Residuals',
+title = 'Histogram of Residuals from Naive Method') +
+theme(axis.title=element_text(size=10),
+axis.text=element_text(size=8),
+strip.text.x=element_text(size=8),
+plot.title.position = 'plot',
+plot.title = element_text(hjust = 0.5),
+legend.title = element_text(size = 6),
+legend.text = element_text(size=5))
+```
+The residuals all appear to be normally distributed and centered around zero. The residuals from the centro oeste and norte regions in particular closely approximate a normal distribution.
+ 
+#### Time series plot
+```{r, fig.width=8, fig.align='left'}
+bmodels.aug %>%
+  autoplot(.innov) +
+  facet_wrap(Region ~.) +
+  labs(y = 'Innovation Residuals',
+       title = 'Time Series Residuals from Naive Method') +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5),
+        legend.title = element_text(size = 6),
+        legend.text = element_text(size=5))
+
+```
+The residual plots show that there may be some unexplained variation in the model in the more recent years, as the variation in the resiudal plots increases at the end. There appears to be several unusual observations in recent years that also could explain why there are more errors with more recent data.
+
+#### ACF plots of residuals
+```{r, fig.width=8, fig.align='left'}  
+bmodels.aug %>%
+  ACF(.innov) %>%
+  autoplot() +
+  facet_wrap(Region ~.) +
+  labs(title = 'ACF of Residuals from Naive Method') +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+```
+The ACF plot shows no significant autocorrelation in the residuals for the centro oeste region. 
+
+#### Ljung-Box test  
+The Ljung Box test results are not signficant for the centro oeste region, so we can conclude that the residuals are indistinguishable from a white noise series.  
+
+```{r} 
+bmodels.fit %>%
+  select(Naive) %>%
+  augment() %>%
+  features(.resid, ljung_box, lag = 10, dof = 0) %>%
+  knitr::kable(caption = 'Ljung-Box Test for Detecting White Noise')
+
+```  
+
+## Additional Analysis 
+
+### Checking for & Removing Outliers
+Since we were not satisfied with the results from our forecasting models, we decided to look for outliers and see if removing the outliers would improve our model.
+```{r, fig.width=8, fig.align='left'}
+dcmp <- train %>% filter(Region == 'CENTRO OESTE') %>%
+   model(
+    STL(Avg.Price ~ trend(window = 7) +
+                   season(window = "periodic"),
+    robust = TRUE)) %>%
+  components() 
+
+k <- dcmp %>% autoplot() +
+  labs(title='STL Decomposition') +
+   theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=6),
+        strip.text = element_text(size=6))
+
+outliers <- dcmp %>%
+  filter(
+    remainder < quantile(remainder, 0.25) - 3*IQR(remainder) |
+    remainder > quantile(remainder, 0.75) + 3*IQR(remainder)
+  )
+
+l <- outliers %>% autoplot()+
+  labs(title='Outliers') +
+   theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=6),
+        strip.text = element_text(size=6))
+
+plot2 <- ggarrange(k, l,  ncol=2, nrow=1)
+annotate_figure(plot2, top = text_grob("Centre Oeste",
+color = "black", face = "bold", size = 12))
+
+```
+  
+Even after removing the outliers, we saw that the Naive model performed the best in forecating the gas prices for the test set.  
+
+### Seasonally-Adjusted Data versus Trend-Cycle component and Actual Data
+We have plotted the seasonal and trend-cycle components with the actual data to understand each component more.
+```{r}
+train %>%
+  ggplot(aes(x=Month)) +
+  geom_line(aes(y=Avg.Price, color='Actual Data')) +
+  geom_line(aes(y=stl_dcmp$season_adjust, color='Seasonally Adjusted')) +
+  geom_line(aes(y=stl_dcmp$trend, color='Trend')) +
+  facet_wrap(.~Region) +
+  labs(title = 'Seasonally-adjusted Data vs Trend-cycle and Actual Data',
+       y = 'Gas Avgerage Resale Price for Brazil') +
+  scale_color_manual(values = c('Red','#3A5D9C', '#FFA500'),
+                     breaks = c('Actual Data', 'Seasonally Adjusted', 'Trend')) +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+```
+
+### Neural Network with Best Model 
+We have applied a neural network to compare with the best-performing model from our earlier analysis, Naive Model.
+```{r, fig.width=8, fig.align='left'}
+
+# Fitting the models
+aa.fit <- train %>%
+model (
+BestModel = NAIVE(Avg.Price),
+NN = NNETAR(Avg.Price)
+)
+
+aa.fc <- aa.fit %>% forecast(test)
+
+
+# Plotting forecast values against the actual values
+#for each Brazilian Region
+
+aa.fc %>%
+autoplot(train, level=NULL) +
+autolayer(test, Avg.Price, color = 'black') +
+  facet_wrap(Region ~ .)+
+labs(y = 'Gas Avgerage Resale Price',
+title = 'Forecasts for Centro Oeste Average Gas Price') +
+  guides(color=guide_legend(title='Forecast')) +
+  theme(axis.title=element_text(size=10),
+        axis.text=element_text(size=8),
+        strip.text.x=element_text(size=8),
+        plot.title.position = 'plot',
+        plot.title = element_text(hjust = 0.5))
+```  
+
+### Accuracy Measures on an average
+```{r}
+aa.fc %>%
+accuracy(df) %>%
+group_by(.model) %>%
+summarise(RMSE = mean(RMSE), MAPE = mean(MAPE),
+          MASE = mean(MASE), MAE = mean(MAE)) %>%
+ungroup() %>%
+arrange(RMSE, MAPE, MASE, MAE) %>%
+knitr::kable(caption = 'Accuracy Measures on an Average')
+
+```
+  
+We can see that there is not much significant difference in the RMSE or MAPE value for both the models.  
+
+# Conclusion
+  In conclusion, we have discovered that a simpler model actually performs better and is more accurate for this data set than an ARIMA or ETS model. A possible explanation for this result is that the trend component is the only significant component that we have identified in the model apart from the error component. In the absence of a strong seasonal trend or additional component, a simple Naive method performed the best among the models we tested. The Naive model had a MAPE value of 5.26%.  
+  
+  One way we could improve upon these results is by considering the hierarchical grouping of the data in our forecasting model. For example, the data has been filtered by region, with several states that are aggregated into a single region. There are also several classifications of products that have been aggregated for the model. A bottom-up forecasting approach, beginning at the state and product classification level and then aggregating upwards, could produce a more accurate and nuanced model.  
+  
+  Another consideration for the future is applying more complex models. Two models that have gained popularity in forecasting energy data are the Grey model and the Prophet model. Fitting these models is a far more advanced process than the methods applied in this project, but would likely produce a very accurate forecast. As discussed in the literature review, machine learning models like the random forest model have also shown great success in forecasting energy data. Future studies on this data could focus on applying any one of these methods to obtain more accurate and robust forecasting models for energy prices and other applications.  
+
+# References 
+## Dataset & R References 
+* https://www.kaggle.com/datasets/matheusfreitag/gas-prices-in-brazil  
+* https://community.rstudio.com/t/help-with-tsibble/72885/5  
+* https://stackoverflow.com/questions/71914704/override-using-groups-argument  
+* https://cran.r-project.org/web/packages/tsibble/vignettes/implicit-na.html 
+
+## Works Cited
+Ceylan, Z., Akbulut, D., & Baytürk, E. (2022). Forecasting gasoline consumption using machine     
+  learning algorithms during COVID-19 pandemic. Energy Sources, Part A: Recovery, Utilization, and 
+  Environmental Effects, 1–19. https://doi.org/10.1080/15567036.2021.2024919 
+Samuelson, R. J. (2014, December 3). Key facts about the Great Oil Crash of 2014. The Washington 
+  Post. Retrieved December 8, 2022, from     
+  https://www.washingtonpost.com/opinions/robert-samuelson-key-facts-about-the-great-oil-crash-of-2
+  014/2014/12/03/a1e2fd94-7b0f-11e4-b821-503cc7efed9e_story.html 
+Stecker, T. (2013, October 17). How the oil embargo sparked energy independence - in Brazil. 
+  Scientific American. Retrieved December 8, 2022, from 
+  https://www.scientificamerican.com/article/how-the-oil-embargo-sparked-energy-independence-in-bra
+  zil/ 
+Zhang, J., &amp; Zhao, J. (2022). Trend- and periodicity-trait-driven gasoline demand forecasting. 
+  Energies, 15(10). https://doi.org/10.3390/en15103553 
